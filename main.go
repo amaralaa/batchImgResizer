@@ -2,9 +2,11 @@ package main
 
 import (
 	"image/jpeg"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,22 +26,20 @@ func main() {
 	}
 	guard := make(chan struct{}, maxGoroutines)
 	log.Println("Start Reading Dir.")
-	err := filepath.Walk("resize", func(path string, info os.FileInfo, err error) error {
+	folderList := readList()
+	sort.StringSlice(folderList).Sort()
+	filepath.Walk("resize", func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() {
-			path = strings.Replace(path, "resize", "", 1)
-			err := os.MkdirAll("new"+path, 0600)
-			if err != nil {
-				return err
+			for _, f := range folderList {
+				if f == info.Name() {
+					log.Println("Found : ", f)
+					new := makeList(path)
+					imgList = append(imgList, new...)
+				}
 			}
-		}
-		if strings.ToLower(filepath.Ext(path)) == ".jpg" || strings.ToLower(filepath.Ext(path)) == ".jpeg" {
-			imgList = append(imgList, path)
 		}
 		return nil
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
 	log.Println("Finish Creating New Dir.")
 	log.Printf("Start resizing %d Images\n", len(imgList))
 	for _, img := range imgList {
@@ -58,19 +58,52 @@ func main() {
 func resizeImg(path string) {
 	file, err := os.Open(path)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return
 	}
 	img, err := jpeg.Decode(file)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return
 	}
 	file.Close()
 	img = resize.Resize(3072, 0, img, resize.Lanczos3)
 	out, err := os.Create(strings.Replace(path, "resize", "new", 1))
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return
 	}
 	defer out.Close()
 	jpeg.Encode(out, img, nil)
 	// log.Printf("img %s finished", path)
+}
+
+func readList() []string {
+	data, err := ioutil.ReadFile("list.txt")
+	if err != nil {
+		log.Fatalln("failed reading list.txt", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	return lines
+}
+
+func makeList(folder string) []string {
+	var imgList []string
+	err := filepath.Walk(folder, func(path string, info os.FileInfo, err error) error {
+		if info.IsDir() {
+			path = strings.Replace(path, "resize", "", 1)
+			err := os.MkdirAll("new"+path, 0644)
+			if err != nil {
+				return err
+			}
+		}
+		if strings.ToLower(filepath.Ext(path)) == ".jpg" || strings.ToLower(filepath.Ext(path)) == ".jpeg" {
+			imgList = append(imgList, path)
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	return imgList
 }
